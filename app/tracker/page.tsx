@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -11,8 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Apple, User, ChefHat, Trash2, Camera } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Plus, Apple, User, ChefHat, Trash2, Camera, Edit3, Loader2, AlertCircle } from "lucide-react"
 import Link from "next/link"
+import { createClient } from "@/lib/supabase/client"
+import { foodItemSchema } from "@/lib/validations/auth"
+import { z } from "zod"
 
 interface FoodItem {
   id: string
@@ -23,6 +26,7 @@ interface FoodItem {
   fat: number
   sugar: number
   serving: string
+  logged_at: string
 }
 
 interface DailyGoals {
@@ -33,11 +37,16 @@ interface DailyGoals {
 }
 
 export default function TrackerPage() {
-  // State management with proper hydration handling
-  const [user, setUser] = useState<{ name: string; email: string } | null>(null)
+  // State management
+  const [user, setUser] = useState<any>(null)
+  const [profile, setProfile] = useState<any>(null)
   const [foodItems, setFoodItems] = useState<FoodItem[]>([])
   const [isAddingFood, setIsAddingFood] = useState(false)
-  const [isClient, setIsClient] = useState(false) // Track if we're on client side
+  const [isEditingFood, setIsEditingFood] = useState(false)
+  const [editingFood, setEditingFood] = useState<FoodItem | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState("")
   const [newFood, setNewFood] = useState({
     name: "",
     calories: "",
@@ -47,7 +56,18 @@ export default function TrackerPage() {
     sugar: "",
     serving: "",
   })
+  const [editFood, setEditFood] = useState({
+    name: "",
+    calories: "",
+    protein: "",
+    carbs: "",
+    fat: "",
+    sugar: "",
+    serving: "",
+  })
+
   const router = useRouter()
+  const supabase = createClient()
 
   const dailyGoals: DailyGoals = {
     calories: 2000,
@@ -56,77 +76,233 @@ export default function TrackerPage() {
     fat: 65,
   }
 
-  // Handle client-side hydration
+  // Load user and food data
   useEffect(() => {
-    setIsClient(true)
+    loadUserData()
+    loadFoodItems()
   }, [])
 
-  // Authentication and data loading - only run on client
-  useEffect(() => {
-    if (!isClient) return
+  const loadUserData = async () => {
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
 
-    const userData = localStorage.getItem("user")
-    if (!userData) {
+      if (userError || !user) {
+        router.push("/")
+        return
+      }
+
+      setUser(user)
+
+      // Load user profile
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single()
+
+      if (profileError) {
+        console.error("Error loading profile:", profileError)
+      } else {
+        setProfile(profileData)
+      }
+    } catch (error) {
+      console.error("Error loading user data:", error)
       router.push("/")
-      return
     }
-    setUser(JSON.parse(userData))
+  }
 
-    const savedFoods = localStorage.getItem("foodItems")
-    if (savedFoods) {
-      setFoodItems(JSON.parse(savedFoods))
+  const loadFoodItems = async () => {
+    try {
+      setIsLoading(true)
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) return
+
+      const today = new Date().toISOString().split("T")[0]
+
+      const { data, error } = await supabase
+        .from("food_items")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("logged_at", today)
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        throw error
+      }
+
+      setFoodItems(data || [])
+    } catch (error) {
+      console.error("Error loading food items:", error)
+      setError("Failed to load food items. Please try again.")
+    } finally {
+      setIsLoading(false)
     }
-  }, [router, isClient])
+  }
 
-  const handleAddFood = (e: React.FormEvent) => {
+  const handleAddFood = async (e: React.FormEvent) => {
     e.preventDefault()
-    const foodItem: FoodItem = {
-      id: Date.now().toString(),
-      name: newFood.name,
-      calories: Number(newFood.calories),
-      protein: Number(newFood.protein),
-      carbs: Number(newFood.carbs),
-      fat: Number(newFood.fat),
-      sugar: Number(newFood.sugar),
-      serving: newFood.serving,
+    setIsSubmitting(true)
+    setError("")
+
+    try {
+      // Validate input
+      const validatedData = foodItemSchema.parse({
+        name: newFood.name,
+        serving: newFood.serving,
+        calories: Number(newFood.calories),
+        protein: Number(newFood.protein),
+        carbs: Number(newFood.carbs),
+        fat: Number(newFood.fat),
+        sugar: Number(newFood.sugar),
+      })
+
+      const { data, error } = await supabase
+        .from("food_items")
+        .insert([
+          {
+            user_id: user.id,
+            ...validatedData,
+            logged_at: new Date().toISOString().split("T")[0],
+          },
+        ])
+        .select()
+
+      if (error) {
+        throw error
+      }
+
+      // Add to local state
+      if (data && data[0]) {
+        setFoodItems([data[0], ...foodItems])
+      }
+
+      // Reset form
+      setNewFood({
+        name: "",
+        calories: "",
+        protein: "",
+        carbs: "",
+        fat: "",
+        sugar: "",
+        serving: "",
+      })
+      setIsAddingFood(false)
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        setError(error.errors[0].message)
+      } else if (error instanceof Error) {
+        setError(error.message)
+      } else {
+        setError("Failed to add food item. Please try again.")
+      }
+    } finally {
+      setIsSubmitting(false)
     }
+  }
 
-    const updatedFoods = [...foodItems, foodItem]
-    setFoodItems(updatedFoods)
+  const handleEditFood = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingFood) return
 
-    // Only access localStorage on client side
-    if (isClient) {
-      localStorage.setItem("foodItems", JSON.stringify(updatedFoods))
+    setIsSubmitting(true)
+    setError("")
+
+    try {
+      // Validate input
+      const validatedData = foodItemSchema.parse({
+        name: editFood.name,
+        serving: editFood.serving,
+        calories: Number(editFood.calories),
+        protein: Number(editFood.protein),
+        carbs: Number(editFood.carbs),
+        fat: Number(editFood.fat),
+        sugar: Number(editFood.sugar),
+      })
+
+      const { data, error } = await supabase
+        .from("food_items")
+        .update(validatedData)
+        .eq("id", editingFood.id)
+        .eq("user_id", user.id)
+        .select()
+
+      if (error) {
+        throw error
+      }
+
+      // Update local state
+      if (data && data[0]) {
+        setFoodItems(foodItems.map((item) => (item.id === editingFood.id ? data[0] : item)))
+      }
+
+      // Reset form
+      setEditingFood(null)
+      setIsEditingFood(false)
+      setEditFood({
+        name: "",
+        calories: "",
+        protein: "",
+        carbs: "",
+        fat: "",
+        sugar: "",
+        serving: "",
+      })
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        setError(error.errors[0].message)
+      } else if (error instanceof Error) {
+        setError(error.message)
+      } else {
+        setError("Failed to update food item. Please try again.")
+      }
+    } finally {
+      setIsSubmitting(false)
     }
+  }
 
-    setNewFood({
-      name: "",
-      calories: "",
-      protein: "",
-      carbs: "",
-      fat: "",
-      sugar: "",
-      serving: "",
+  const handleRemoveFood = async (id: string) => {
+    try {
+      const { error } = await supabase.from("food_items").delete().eq("id", id).eq("user_id", user.id)
+
+      if (error) {
+        throw error
+      }
+
+      // Remove from local state
+      setFoodItems(foodItems.filter((item) => item.id !== id))
+    } catch (error) {
+      console.error("Error removing food item:", error)
+      setError("Failed to remove food item. Please try again.")
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut()
+      router.push("/")
+    } catch (error) {
+      console.error("Error signing out:", error)
+    }
+  }
+
+  const startEditFood = (food: FoodItem) => {
+    setEditingFood(food)
+    setEditFood({
+      name: food.name,
+      calories: food.calories.toString(),
+      protein: food.protein.toString(),
+      carbs: food.carbs.toString(),
+      fat: food.fat.toString(),
+      sugar: food.sugar.toString(),
+      serving: food.serving,
     })
-    setIsAddingFood(false)
-  }
-
-  const handleRemoveFood = (id: string) => {
-    const updatedFoods = foodItems.filter((item) => item.id !== id)
-    setFoodItems(updatedFoods)
-
-    // Only access localStorage on client side
-    if (isClient) {
-      localStorage.setItem("foodItems", JSON.stringify(updatedFoods))
-    }
-  }
-
-  const handleLogout = () => {
-    if (isClient) {
-      localStorage.removeItem("user")
-      localStorage.removeItem("foodItems")
-    }
-    router.push("/")
+    setIsEditingFood(true)
   }
 
   const totals = foodItems.reduce(
@@ -140,21 +316,15 @@ export default function TrackerPage() {
     { calories: 0, protein: 0, carbs: 0, fat: 0, sugar: 0 },
   )
 
-  // Show loading state during hydration
-  if (!isClient) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading NutriTrack...</p>
+          <Loader2 className="h-12 w-12 text-green-600 mx-auto mb-4 animate-spin" />
+          <p className="text-gray-600">Loading your nutrition data...</p>
         </div>
       </div>
     )
-  }
-
-  // Redirect if no user (only after hydration)
-  if (!user) {
-    return null
   }
 
   return (
@@ -180,7 +350,7 @@ export default function TrackerPage() {
             </Link>
             <div className="flex items-center space-x-2">
               <User className="h-5 w-5 text-gray-600" />
-              <span className="text-sm text-gray-600">{user.name}</span>
+              <span className="text-sm text-gray-600">{profile?.name || "User"}</span>
               <Button variant="outline" size="sm" onClick={handleLogout}>
                 Logout
               </Button>
@@ -190,6 +360,14 @@ export default function TrackerPage() {
       </header>
 
       <div className="container mx-auto px-4 py-8">
+        {/* Error display */}
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
             <div className="flex items-center justify-between">
@@ -222,6 +400,7 @@ export default function TrackerPage() {
                             onChange={(e) => setNewFood({ ...newFood, name: e.target.value })}
                             placeholder="e.g., Grilled Chicken Breast"
                             required
+                            disabled={isSubmitting}
                           />
                         </div>
                         <div>
@@ -232,6 +411,7 @@ export default function TrackerPage() {
                             onChange={(e) => setNewFood({ ...newFood, serving: e.target.value })}
                             placeholder="e.g., 100g"
                             required
+                            disabled={isSubmitting}
                           />
                         </div>
                         <div>
@@ -239,9 +419,11 @@ export default function TrackerPage() {
                           <Input
                             id="calories"
                             type="number"
+                            min="0"
                             value={newFood.calories}
                             onChange={(e) => setNewFood({ ...newFood, calories: e.target.value })}
                             required
+                            disabled={isSubmitting}
                           />
                         </div>
                         <div>
@@ -249,10 +431,12 @@ export default function TrackerPage() {
                           <Input
                             id="protein"
                             type="number"
+                            min="0"
                             step="0.1"
                             value={newFood.protein}
                             onChange={(e) => setNewFood({ ...newFood, protein: e.target.value })}
                             required
+                            disabled={isSubmitting}
                           />
                         </div>
                         <div>
@@ -260,10 +444,12 @@ export default function TrackerPage() {
                           <Input
                             id="carbs"
                             type="number"
+                            min="0"
                             step="0.1"
                             value={newFood.carbs}
                             onChange={(e) => setNewFood({ ...newFood, carbs: e.target.value })}
                             required
+                            disabled={isSubmitting}
                           />
                         </div>
                         <div>
@@ -271,10 +457,12 @@ export default function TrackerPage() {
                           <Input
                             id="fat"
                             type="number"
+                            min="0"
                             step="0.1"
                             value={newFood.fat}
                             onChange={(e) => setNewFood({ ...newFood, fat: e.target.value })}
                             required
+                            disabled={isSubmitting}
                           />
                         </div>
                         <div>
@@ -282,15 +470,24 @@ export default function TrackerPage() {
                           <Input
                             id="sugar"
                             type="number"
+                            min="0"
                             step="0.1"
                             value={newFood.sugar}
                             onChange={(e) => setNewFood({ ...newFood, sugar: e.target.value })}
                             required
+                            disabled={isSubmitting}
                           />
                         </div>
                       </div>
-                      <Button type="submit" className="w-full">
-                        Add Food Item
+                      <Button type="submit" className="w-full" disabled={isSubmitting}>
+                        {isSubmitting ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Adding Food...
+                          </>
+                        ) : (
+                          "Add Food Item"
+                        )}
                       </Button>
                     </form>
                   </DialogContent>
@@ -322,14 +519,24 @@ export default function TrackerPage() {
                             <Badge variant="outline">Sugar: {item.sugar}g</Badge>
                           </div>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveFood(item.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center space-x-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => startEditFood(item)}
+                            className="text-blue-600 hover:text-blue-700"
+                          >
+                            <Edit3 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveFood(item.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -429,6 +636,120 @@ export default function TrackerPage() {
             </Card>
           </div>
         </div>
+
+        {/* Edit Food Dialog */}
+        <Dialog open={isEditingFood} onOpenChange={setIsEditingFood}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Food Item</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleEditFood} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <Label htmlFor="edit-food-name">Food Name</Label>
+                  <Input
+                    id="edit-food-name"
+                    value={editFood.name}
+                    onChange={(e) => setEditFood({ ...editFood, name: e.target.value })}
+                    placeholder="e.g., Grilled Chicken Breast"
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-serving">Serving Size</Label>
+                  <Input
+                    id="edit-serving"
+                    value={editFood.serving}
+                    onChange={(e) => setEditFood({ ...editFood, serving: e.target.value })}
+                    placeholder="e.g., 100g"
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-calories">Calories</Label>
+                  <Input
+                    id="edit-calories"
+                    type="number"
+                    min="0"
+                    value={editFood.calories}
+                    onChange={(e) => setEditFood({ ...editFood, calories: e.target.value })}
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-protein">Protein (g)</Label>
+                  <Input
+                    id="edit-protein"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={editFood.protein}
+                    onChange={(e) => setEditFood({ ...editFood, protein: e.target.value })}
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-carbs">Carbs (g)</Label>
+                  <Input
+                    id="edit-carbs"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={editFood.carbs}
+                    onChange={(e) => setEditFood({ ...editFood, carbs: e.target.value })}
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-fat">Fat (g)</Label>
+                  <Input
+                    id="edit-fat"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={editFood.fat}
+                    onChange={(e) => setEditFood({ ...editFood, fat: e.target.value })}
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="edit-sugar">Sugar (g)</Label>
+                  <Input
+                    id="edit-sugar"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={editFood.sugar}
+                    onChange={(e) => setEditFood({ ...editFood, sugar: e.target.value })}
+                    required
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+              <div className="flex space-x-2">
+                <Button type="submit" className="flex-1" disabled={isSubmitting}>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    "Update Food Item"
+                  )}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setIsEditingFood(false)} disabled={isSubmitting}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

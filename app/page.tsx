@@ -1,58 +1,144 @@
-"use client"
+"use client";
 
-import type React from "react"
-
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import Image from "next/image"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Apple, Utensils, TrendingUp, Sparkles, Camera } from "lucide-react"
+import type React from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Image from "next/image";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Apple,
+  Utensils,
+  TrendingUp,
+  Sparkles,
+  Camera,
+  AlertCircle,
+  Loader2,
+} from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { signInSchema, signUpSchema } from "@/lib/validations/auth";
+import { z } from "zod";
 
 export default function LandingPage() {
-  // State management for form inputs - keeping track of user input
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [name, setName] = useState("")
-  const router = useRouter()
+  // State management for form inputs and UI
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const router = useRouter();
+  const supabase = createClient();
 
-  // Handle login form submission - simple mock authentication for now
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault()
-    // Basic validation - just check if fields are filled
-    if (email && password) {
-      // Store user data in localStorage for persistence across sessions
-      localStorage.setItem("user", JSON.stringify({ email, name: name || "User" }))
-      // Redirect to tracker page after successful login
-      router.push("/tracker")
-    }
-  }
+  // Handle login form submission with proper validation
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError("");
+    setSuccess("");
 
-  // Handle signup form submission - similar to login but requires name
-  const handleSignup = (e: React.FormEvent) => {
-    e.preventDefault()
-    // All fields required for signup
-    if (email && password && name) {
-      // Store user data and redirect
-      localStorage.setItem("user", JSON.stringify({ email, name }))
-      router.push("/tracker")
+    try {
+      // Validate input
+      const validatedData = signInSchema.parse({ email, password });
+
+      // Attempt to sign in with Supabase
+      const { data, error: authError } = await supabase.auth.signInWithPassword(
+        {
+          email: validatedData.email,
+          password: validatedData.password,
+        }
+      );
+
+      if (authError) {
+        throw new Error(authError.message);
+      }
+
+      if (data.user) {
+        setSuccess("Successfully signed in! Redirecting...");
+        // Redirect will be handled by middleware
+        router.push("/tracker");
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        setError(error.errors[0].message);
+      } else if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError("An unexpected error occurred. Please try again.");
+      }
+    } finally {
+      setIsLoading(false);
     }
-  }
+  };
+
+  // Handle signup form submission with proper validation
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      // Validate input
+      const validatedData = signUpSchema.parse({ name, email, password });
+
+      // Attempt to sign up with Supabase
+      const { data, error: authError } = await supabase.auth.signUp({
+        email: validatedData.email,
+        password: validatedData.password,
+        options: {
+          data: {
+            name: validatedData.name,
+          },
+        },
+      });
+
+      if (authError) {
+        throw new Error(authError.message);
+      }
+
+      if (data.user) {
+        if (data.user.email_confirmed_at) {
+          setSuccess("Account created successfully! Redirecting...");
+          router.push("/tracker");
+        } else {
+          setSuccess(
+            "Please check your email and click the confirmation link to activate your account."
+          );
+        }
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        setError(error.errors[0].message);
+      } else if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError("An unexpected error occurred. Please try again.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50">
-      {/* Main navigation header - consistent across all pages */}
+      {/* Main navigation header */}
       <header className="border-b bg-white/80 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          {/* Logo section with app branding */}
           <div className="flex items-center space-x-2">
             <Apple className="h-8 w-8 text-green-600" />
             <span className="text-2xl font-bold text-gray-900">NutriTrack</span>
           </div>
-          {/* Navigation links - hidden on mobile, shown on desktop */}
           <nav className="hidden md:flex space-x-8">
             <a href="#features" className="text-gray-600 hover:text-gray-900">
               Features
@@ -68,23 +154,21 @@ export default function LandingPage() {
       </header>
 
       <div className="container mx-auto px-4 py-12">
-        {/* Two-column layout: content on left, auth form on right */}
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           {/* Hero content section */}
           <div className="space-y-8">
             <div className="space-y-4">
-              {/* Main headline - grabbing attention */}
               <h1 className="text-4xl lg:text-6xl font-bold text-gray-900 leading-tight">
                 Track Your Nutrition Journey
               </h1>
-              {/* Subheading explaining the value proposition */}
               <p className="text-xl text-gray-600 leading-relaxed">
-                Discover healthy recipes, track your calories, and achieve your fitness goals with our comprehensive
-                nutrition platform powered by AI.
+                Discover healthy recipes, track your calories, and achieve your
+                fitness goals with our comprehensive nutrition platform powered
+                by AI.
               </p>
             </div>
 
-            {/* Feature highlights - showing key benefits */}
+            {/* Feature highlights */}
             <div className="flex flex-wrap gap-4">
               <div className="flex items-center space-x-2 bg-white rounded-full px-4 py-2 shadow-sm">
                 <Utensils className="h-5 w-5 text-green-600" />
@@ -100,67 +184,97 @@ export default function LandingPage() {
               </div>
               <div className="flex items-center space-x-2 bg-white rounded-full px-4 py-2 shadow-sm">
                 <Sparkles className="h-5 w-5 text-orange-600" />
-                <span className="text-sm font-medium">Personalized Plans</span>
+                <span className="text-sm font-medium">Secure & Private</span>
               </div>
             </div>
 
-            {/* Authentication forms - login and signup tabs */}
+            {/* Authentication forms */}
             <Card className="w-full max-w-md">
               <CardHeader>
                 <CardTitle>Get Started</CardTitle>
-                <CardDescription>Sign in to your account or create a new one</CardDescription>
+                <CardDescription>
+                  Create your account or sign in to continue
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                {/* Tab system for switching between login and signup */}
+                {/* Error and success messages */}
+                {error && (
+                  <Alert variant="destructive" className="mb-4">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+                {success && (
+                  <Alert className="mb-4 border-green-200 bg-green-50">
+                    <AlertDescription className="text-green-800">
+                      {success}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 <Tabs defaultValue="login" className="w-full">
                   <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="login">Login</TabsTrigger>
+                    <TabsTrigger value="login">Sign In</TabsTrigger>
                     <TabsTrigger value="signup">Sign Up</TabsTrigger>
                   </TabsList>
 
-                  {/* Login form tab */}
+                  {/* Login form */}
                   <TabsContent value="login" className="space-y-4">
                     <form onSubmit={handleLogin} className="space-y-4">
                       <div className="space-y-2">
-                        <Label htmlFor="email">Email</Label>
+                        <Label htmlFor="login-email">Email</Label>
                         <Input
-                          id="email"
+                          id="login-email"
                           type="email"
                           placeholder="Enter your email"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
+                          disabled={isLoading}
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="password">Password</Label>
+                        <Label htmlFor="login-password">Password</Label>
                         <Input
-                          id="password"
+                          id="login-password"
                           type="password"
                           placeholder="Enter your password"
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           required
+                          disabled={isLoading}
                         />
                       </div>
-                      <Button type="submit" className="w-full">
-                        Sign In
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Signing In...
+                          </>
+                        ) : (
+                          "Sign In"
+                        )}
                       </Button>
                     </form>
                   </TabsContent>
 
-                  {/* Signup form tab - includes name field */}
+                  {/* Signup form */}
                   <TabsContent value="signup" className="space-y-4">
                     <form onSubmit={handleSignup} className="space-y-4">
                       <div className="space-y-2">
-                        <Label htmlFor="name">Full Name</Label>
+                        <Label htmlFor="signup-name">Full Name</Label>
                         <Input
-                          id="name"
+                          id="signup-name"
                           type="text"
-                          placeholder="Enter your name"
+                          placeholder="Enter your full name"
                           value={name}
                           onChange={(e) => setName(e.target.value)}
                           required
+                          disabled={isLoading}
                         />
                       </div>
                       <div className="space-y-2">
@@ -172,6 +286,7 @@ export default function LandingPage() {
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
+                          disabled={isLoading}
                         />
                       </div>
                       <div className="space-y-2">
@@ -179,14 +294,30 @@ export default function LandingPage() {
                         <Input
                           id="signup-password"
                           type="password"
-                          placeholder="Create a password"
+                          placeholder="Create a strong password"
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           required
+                          disabled={isLoading}
                         />
+                        <p className="text-xs text-gray-500">
+                          Password must be at least 8 characters with uppercase,
+                          lowercase, and number
+                        </p>
                       </div>
-                      <Button type="submit" className="w-full">
-                        Create Account
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Creating Account...
+                          </>
+                        ) : (
+                          "Create Account"
+                        )}
                       </Button>
                     </form>
                   </TabsContent>
@@ -195,30 +326,31 @@ export default function LandingPage() {
             </Card>
           </div>
 
-          {/* Hero image section - visual appeal */}
+          {/* Hero image section */}
           <div className="relative">
-            <div className="relative bg-white rounded-2xl shadow-2xl p-8 transform rotate-2 hover:rotate-0 transition-transform duration-300">
+            <div className="relative bg-white rounded-2xl shadow-2xl p-6 transform rotate-2 hover:rotate-0 transition-transform duration-300 max-w-md mx-auto">
               <Image
                 src="/images/healthy-vegetables.png"
                 alt="Fresh healthy vegetables and fruits - colorful sliced produce including orange, avocado, cucumber, tomato, onion, and bell pepper arranged beautifully for nutrition tracking"
-                width={600}
-                height={600}
+                width={400}
+                height={400}
                 className="rounded-lg w-full h-auto"
                 priority
               />
-              <div className="absolute -top-4 -right-4 bg-green-500 text-white rounded-full p-3 shadow-lg">
-                <Sparkles className="h-6 w-6" />
+              <div className="absolute -top-3 -right-3 bg-green-500 text-white rounded-full p-2 shadow-lg">
+                <Sparkles className="h-5 w-5" />
               </div>
             </div>
-            {/* Floating feature cards */}
-            <div className="absolute -bottom-6 -left-6 bg-white rounded-lg shadow-lg p-4 max-w-xs">
-              <div className="flex items-center space-x-3">
-                <div className="bg-green-100 rounded-full p-2">
-                  <Camera className="h-5 w-5 text-green-600" />
+            <div className="absolute -bottom-4 -left-4 bg-white rounded-lg shadow-lg p-3 max-w-xs">
+              <div className="flex items-center space-x-2">
+                <div className="bg-green-100 rounded-full p-1.5">
+                  <Camera className="h-4 w-4 text-green-600" />
                 </div>
                 <div>
-                  <p className="font-semibold text-sm">AI Photo Analysis</p>
-                  <p className="text-xs text-gray-600">Scan your meals instantly</p>
+                  <p className="font-semibold text-xs">Secure & Private</p>
+                  <p className="text-xs text-gray-600">
+                    Your data is protected
+                  </p>
                 </div>
               </div>
             </div>
@@ -228,10 +360,12 @@ export default function LandingPage() {
         {/* Features section */}
         <section id="features" className="mt-24">
           <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">Everything You Need for Healthy Living</h2>
+            <h2 className="text-3xl font-bold text-gray-900 mb-4">
+              Everything You Need for Healthy Living
+            </h2>
             <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              Our comprehensive platform combines AI technology with nutrition science to help you achieve your health
-              goals.
+              Our comprehensive platform combines AI technology with nutrition
+              science to help you achieve your health goals securely.
             </p>
           </div>
 
@@ -243,7 +377,8 @@ export default function LandingPage() {
                 </div>
                 <h3 className="font-semibold text-lg mb-2">Smart Tracking</h3>
                 <p className="text-gray-600 text-sm">
-                  Track calories, macros, and nutrients with our intelligent food database and progress visualization.
+                  Track calories, macros, and nutrients with our intelligent
+                  food database and progress visualization.
                 </p>
               </CardContent>
             </Card>
@@ -255,7 +390,8 @@ export default function LandingPage() {
                 </div>
                 <h3 className="font-semibold text-lg mb-2">Photo Analysis</h3>
                 <p className="text-gray-600 text-sm">
-                  Simply take a photo of your meal and our AI will analyze the nutritional content automatically.
+                  Simply take a photo of your meal and our AI will analyze the
+                  nutritional content automatically.
                 </p>
               </CardContent>
             </Card>
@@ -265,9 +401,12 @@ export default function LandingPage() {
                 <div className="bg-purple-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
                   <Sparkles className="h-8 w-8 text-purple-600" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">AI Recipe Generator</h3>
+                <h3 className="font-semibold text-lg mb-2">
+                  AI Recipe Generator
+                </h3>
                 <p className="text-gray-600 text-sm">
-                  Get personalized healthy recipes based on your available ingredients and dietary preferences.
+                  Get personalized healthy recipes based on your available
+                  ingredients and dietary preferences.
                 </p>
               </CardContent>
             </Card>
@@ -277,9 +416,10 @@ export default function LandingPage() {
                 <div className="bg-orange-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
                   <Utensils className="h-8 w-8 text-orange-600" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Recipe Library</h3>
+                <h3 className="font-semibold text-lg mb-2">Secure & Private</h3>
                 <p className="text-gray-600 text-sm">
-                  Browse thousands of healthy recipes with detailed nutritional information and filtering options.
+                  Your personal data is encrypted and secure with
+                  enterprise-grade security and privacy protection.
                 </p>
               </CardContent>
             </Card>
@@ -287,5 +427,5 @@ export default function LandingPage() {
         </section>
       </div>
     </div>
-  )
+  );
 }
