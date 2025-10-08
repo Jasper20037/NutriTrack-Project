@@ -54,9 +54,9 @@ Create a `.env` file in the backend folder with your credentials:
 ```
 DB_HOST=localhost
 DB_USER=root
-DB_PASSWORD=yourpassword
+DB_PASSWORD=*******
 DB_NAME=nutritrack
-OPENAI_API_KEY=your_openai_api_key
+GOOGLE_AI_API_KEY=***********
 ```
 
 ### 4. Set up the frontend
